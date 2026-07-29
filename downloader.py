@@ -225,7 +225,11 @@ def verify_track_duration(track):
 # GERADOR DE CD COM FILTRO REAL DE TEMPO (< 15M)
 def generate_cd_playlist(artist, limit=20):
     candidates = []
-    search_query = f"ytsearch{limit * 2}:{artist} clipe oficial"
+    # Antes: limit * 2 (podia pedir 40+ resultados, forçando paginação
+    # multi-página no YouTube, que é o que dispara bloqueio 403).
+    # Agora: no máximo 20, cabendo numa única página de busca.
+    search_count = min(limit * 2, 20)
+    search_query = f"ytsearch{search_count}:{artist} clipe oficial"
     opts = {
         'quiet': True, 
         'extract_flat': True, 
