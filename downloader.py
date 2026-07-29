@@ -97,7 +97,9 @@ def fetch_single_query(q):
         'quiet': True, 
         'default_search': 'ytsearch1', 
         'extract_flat': True, 
-        'nocheckcertificate': True
+        'nocheckcertificate': True,
+        'sleep_interval_requests': 1,
+        'retries': 3,
     }
     if is_valid_cookie_file(COOKIE_FILE):
         search_opts['cookiefile'] = COOKIE_FILE
@@ -134,7 +136,10 @@ def fetch_single_query(q):
     return None
 
 def fetch_results(queries):
-    with ThreadPoolExecutor(max_workers=10) as executor:
+    # Reduzido de 10 para 3 threads simultâneas: buscas em paralelo demais
+    # com o mesmo cookie/IP são interpretadas pelo YouTube como comportamento
+    # de bot e geram bloqueios 403/timeout.
+    with ThreadPoolExecutor(max_workers=3) as executor:
         futures = [executor.submit(fetch_single_query, q) for q in queries if q.strip()]
         raw_results = [f.result() for f in futures]
     return [r for r in raw_results if r is not None]
@@ -269,7 +274,7 @@ def generate_cd_playlist(artist, limit=20):
                 return None
         return c
 
-    with ThreadPoolExecutor(max_workers=10) as executor:
+    with ThreadPoolExecutor(max_workers=4) as executor:
         futures = [executor.submit(process_candidate, c) for c in candidates]
         for f in futures:
             res = f.result()
@@ -295,15 +300,18 @@ def generate_custom_playlist(query, limit=30):
         'extract_flat': True, 
         'nocheckcertificate': True, 
         'compat_opts': ['no-youtube-js'], 
-        'socket_timeout': 5, 
-        'retries': 1
+        'socket_timeout': 8, 
+        'retries': 3,
+        'sleep_interval_requests': 1,
     }
     if is_valid_cookie_file(COOKIE_FILE):
         opts['cookiefile'] = COOKIE_FILE
         
     results = []
     
-    with ThreadPoolExecutor(max_workers=5) as executor:
+    # Reduzido de 5 para 2 threads simultâneas: evita disparar rajadas de
+    # requisições concorrentes que o YouTube identifica como bot (403 Forbidden)
+    with ThreadPoolExecutor(max_workers=2) as executor:
         futures = [executor.submit(fetch_single_group, group, items_per_group, opts) for group in grouped_terms]
         for f in futures:
             results.extend(f.result())
@@ -337,7 +345,7 @@ def generate_custom_playlist(query, limit=30):
                 return None
         return c
 
-    with ThreadPoolExecutor(max_workers=10) as executor:
+    with ThreadPoolExecutor(max_workers=4) as executor:
         futures = [executor.submit(process_candidate, c) for c in candidates]
         for f in futures:
             res = f.result()
