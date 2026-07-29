@@ -48,6 +48,35 @@ try:
 except Exception as e:
     print(f"[BOOT WARNING] Falha ao desativar a validação de certificados SSL: {e}")
 
+# ===================================================
+# 3) PATCH DIRETO NO URLLIB3 — ESTE É O VERDADEIRO CULPADO
+# O yt-dlp usa 'requests' como backend de rede por padrão nas versões
+# recentes, e o 'requests' usa 'urllib3' por baixo. O urllib3 NÃO lê
+# ssl.create_default_context() — ele tem sua própria função interna
+# (urllib3.util.ssl_.create_urllib3_context). Sem patchear ela
+# diretamente, o CERTIFICATE_VERIFY_FAILED persiste mesmo com
+# nocheckcertificate=True no yt-dlp e com os patches acima.
+# ===================================================
+try:
+    import urllib3
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+    from urllib3.util import ssl_ as _urllib3_ssl_module
+
+    _original_urllib3_create_context = _urllib3_ssl_module.create_urllib3_context
+
+    def _patched_urllib3_create_context(*args, **kwargs):
+        ctx = _original_urllib3_create_context(*args, **kwargs)
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        return ctx
+
+    _urllib3_ssl_module.create_urllib3_context = _patched_urllib3_create_context
+    print("[BOOT SUCCESS] urllib3 SSL context patcheado com sucesso (cobre requests/yt-dlp).")
+except ImportError:
+    print("[BOOT INFO] urllib3 não encontrado no ambiente, pulando patch específico.")
+except Exception as e:
+    print(f"[BOOT WARNING] Falha ao patchear urllib3: {e}")
+
 print(f"[BOOT] SSL_CERT_FILE apontando para: {os.environ.get('SSL_CERT_FILE')}")
 
 
