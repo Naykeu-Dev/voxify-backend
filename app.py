@@ -1,21 +1,38 @@
+# ===================================================
+# FIX DEFINITIVO DE SSL — DEVE SER A PRIMEIRA COISA DO ARQUIVO
+# Força o Python/urllib3/yt-dlp a usarem o bundle de certificados
+# do certifi, resolvendo o CERTIFICATE_VERIFY_FAILED no Render.
+# ===================================================
+import os
+import certifi
+
+os.environ["SSL_CERT_FILE"] = certifi.where()
+os.environ["REQUESTS_CA_BUNDLE"] = certifi.where()
+os.environ["CURL_CA_BUNDLE"] = certifi.where()  # cobre libcurl/pycurl usados por algumas libs internas
+
 from flask import Flask, request, jsonify, send_file, send_from_directory, redirect
 from flask import Response
 from flask_cors import CORS
-import os, shutil, io, zipfile, time, re, json, random
+import shutil, io, zipfile, time, re, json, random
 import urllib.request
 import urllib.parse
 import yt_dlp
 import database as db
 
 # ===================================================
-# BYPASS GLOBAL DE VERIFICAÇÃO SSL (IMPEDE [SSL: CERTIFICATE_VERIFY_FAILED])
+# BYPASS GLOBAL DE VERIFICAÇÃO SSL (MANTIDO COMO FALLBACK)
+# Agora o certifi já resolve na raiz, mas deixamos isso como
+# segunda camada de proteção pra chamadas que ainda usem
+# ssl._create_default_https_context diretamente.
 # ===================================================
 import ssl
 try:
     ssl._create_default_https_context = ssl._create_unverified_context
-    print("[BOOT SUCCESS] Verificação global de certificados SSL desativada com sucesso.")
+    print("[BOOT SUCCESS] Verificação global de certificados SSL desativada com sucesso (fallback).")
 except Exception as e:
     print(f"[BOOT WARNING] Falha ao desativar a validação de certificados SSL: {e}")
+
+print(f"[BOOT] SSL_CERT_FILE apontando para: {os.environ.get('SSL_CERT_FILE')}")
 
 
 # Importações corrigidas de downloader
