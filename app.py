@@ -20,15 +20,31 @@ import yt_dlp
 import database as db
 
 # ===================================================
-# BYPASS GLOBAL DE VERIFICAÇÃO SSL (MANTIDO COMO FALLBACK)
-# Agora o certifi já resolve na raiz, mas deixamos isso como
-# segunda camada de proteção pra chamadas que ainda usem
-# ssl._create_default_https_context diretamente.
+# BYPASS GLOBAL DE VERIFICAÇÃO SSL — VERSÃO CORRIGIDA
+# IMPORTANTE: ssl._create_default_https_context SÓ afeta urllib.request
+# puro (stdlib). O yt-dlp usa por baixo urllib3/requests, que chamam a
+# função PÚBLICA ssl.create_default_context() — por isso o fix anterior
+# não resolvia o erro no extractor youtube:search.
+# Aqui patcheamos as DUAS, cobrindo qualquer biblioteca HTTP usada.
 # ===================================================
 import ssl
+
 try:
+    # 1) Cobre urllib.request puro (stdlib)
     ssl._create_default_https_context = ssl._create_unverified_context
-    print("[BOOT SUCCESS] Verificação global de certificados SSL desativada com sucesso (fallback).")
+
+    # 2) Cobre urllib3 / requests / yt-dlp (a função pública real usada por elas)
+    _original_create_default_context = ssl.create_default_context
+
+    def _patched_create_default_context(*args, **kwargs):
+        ctx = _original_create_default_context(*args, **kwargs)
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        return ctx
+
+    ssl.create_default_context = _patched_create_default_context
+
+    print("[BOOT SUCCESS] Verificação global de certificados SSL desativada (urllib + urllib3/requests).")
 except Exception as e:
     print(f"[BOOT WARNING] Falha ao desativar a validação de certificados SSL: {e}")
 
