@@ -9,10 +9,30 @@ from concurrent.futures import ThreadPoolExecutor
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 TMP_DIR = os.path.join(BASE_DIR, 'downloads')
-COOKIE_FILE = os.path.join(BASE_DIR, 'youtube_cookies.txt')
 
 if not os.path.exists(TMP_DIR):
     os.makedirs(TMP_DIR)
+
+# ===================================================
+# LOCALIZAÇÃO DO ARQUIVO DE COOKIES
+# Prioridade 1: Secret File do Render (/etc/secrets/youtube_cookies.txt)
+#   -> configurado no Dashboard Render > Environment > Secret Files
+#   -> não passa pelo Git, não corrompe encoding, não expõe cookies no repo
+# Prioridade 2: arquivo local (útil pra testar na sua máquina Windows)
+# ===================================================
+_RENDER_SECRET_COOKIE_PATH = "/etc/secrets/youtube_cookies.txt"
+_LOCAL_COOKIE_PATH = os.path.join(BASE_DIR, 'youtube_cookies.txt')
+
+def get_cookie_file_path():
+    """
+    Retorna o caminho do cookies.txt correto dependendo do ambiente:
+    Render (produção) usa Secret File, ambiente local usa o arquivo na pasta backend.
+    """
+    if os.path.exists(_RENDER_SECRET_COOKIE_PATH):
+        return _RENDER_SECRET_COOKIE_PATH
+    return _LOCAL_COOKIE_PATH
+
+COOKIE_FILE = get_cookie_file_path()
 
 def is_valid_cookie_file(path):
     """
@@ -24,9 +44,16 @@ def is_valid_cookie_file(path):
     try:
         with open(path, 'r', encoding='utf-8', errors='ignore') as f:
             first_line = f.readline()
-            return first_line.startswith('# Netscape') or 'cookie' in first_line.lower()
+            return first_line.startswith('# Netscape') or first_line.startswith('# HTTP Cookie File') or 'cookie' in first_line.lower()
     except Exception:
         return False
+
+# LOG DE BOOT — confirma qual fonte de cookies está sendo usada
+if is_valid_cookie_file(COOKIE_FILE):
+    print(f"[BOOT] Cookies do YouTube carregados com sucesso de: {COOKIE_FILE}")
+else:
+    print(f"[BOOT ALERTA] Nenhum cookies.txt válido encontrado em: {COOKIE_FILE}. "
+          f"Buscas continuarão funcionando, mas o YouTube pode bloquear como bot em alguns casos.")
 
 def format_url(url_or_id):
     if not url_or_id: return ""

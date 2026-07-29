@@ -238,7 +238,9 @@ def stream_audio(video_id):
             return send_file(permanent_path)
 
     print(f"[PYTHON LOG] CACHE MISS. Extraindo link direto do YouTube via yt-dlp...")
-    COOKIE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'youtube_cookies.txt')
+    # Usa a mesma lógica centralizada do downloader.py (Secret File do Render > arquivo local)
+    from downloader import get_cookie_file_path
+    COOKIE_FILE = get_cookie_file_path()
     
     opts = {
         'format': 'bestaudio/best', 
