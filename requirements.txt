@@ -1,0 +1,5 @@
+Flask==3.0.0
+Flask-Cors==4.0.0
+yt-dlp==2024.03.10
+gunicorn==21.2.0
+pydub
