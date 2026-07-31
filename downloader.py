@@ -18,10 +18,33 @@ if not os.path.exists(TMP_DIR):
 # Prioridade 1: Secret File do Render (/etc/secrets/youtube_cookies.txt)
 #   -> configurado no Dashboard Render > Environment > Secret Files
 #   -> não passa pelo Git, não corrompe encoding, não expõe cookies no repo
+#   -> IMPORTANTE: esse arquivo é montado READ-ONLY pelo Render! O yt-dlp
+#      tenta regravar o cookiejar ao final de cada sessão (pra persistir
+#      cookies rotacionados), e isso falha com OSError(30, 'Read-only
+#      file system') se apontarmos direto pro Secret File. Por isso,
+#      copiamos para um arquivo gravável em /tmp na inicialização.
 # Prioridade 2: arquivo local (útil pra testar na sua máquina Windows)
 # ===================================================
 _RENDER_SECRET_COOKIE_PATH = "/etc/secrets/youtube_cookies.txt"
 _LOCAL_COOKIE_PATH = os.path.join(BASE_DIR, 'youtube_cookies.txt')
+_WRITABLE_COOKIE_PATH = "/tmp/youtube_cookies_writable.txt"
+
+def _prepare_writable_cookie_file():
+    """
+    Copia o cookie do Secret File (read-only) para /tmp (gravável),
+    permitindo que o yt-dlp regrave o cookiejar sem estourar OSError.
+    Chamado uma vez na inicialização do módulo.
+    """
+    import shutil as _shutil
+    if os.path.exists(_RENDER_SECRET_COOKIE_PATH):
+        try:
+            _shutil.copyfile(_RENDER_SECRET_COOKIE_PATH, _WRITABLE_COOKIE_PATH)
+            print(f"[BOOT] Cookie copiado do Secret File (read-only) para local gravável: {_WRITABLE_COOKIE_PATH}")
+            return _WRITABLE_COOKIE_PATH
+        except Exception as e:
+            print(f"[BOOT WARNING] Falha ao copiar cookie pra local gravável: {e}. Usando Secret File direto (pode dar erro de gravação).")
+            return _RENDER_SECRET_COOKIE_PATH
+    return _LOCAL_COOKIE_PATH
 
 # ===================================================
 # SUPORTE A PROXY (opcional)
@@ -68,11 +91,17 @@ except ImportError:
 def get_cookie_file_path():
     """
     Retorna o caminho do cookies.txt correto dependendo do ambiente:
-    Render (produção) usa Secret File, ambiente local usa o arquivo na pasta backend.
+    Render (produção) usa a cópia gravável em /tmp (derivada do Secret File),
+    ambiente local usa o arquivo na pasta backend.
     """
+    if os.path.exists(_WRITABLE_COOKIE_PATH):
+        return _WRITABLE_COOKIE_PATH
     if os.path.exists(_RENDER_SECRET_COOKIE_PATH):
         return _RENDER_SECRET_COOKIE_PATH
     return _LOCAL_COOKIE_PATH
+
+# Prepara a cópia gravável do cookie assim que o módulo é carregado
+_prepare_writable_cookie_file()
 
 COOKIE_FILE = get_cookie_file_path()
 
