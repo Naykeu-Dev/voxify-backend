@@ -145,7 +145,7 @@ def apply_common_opts(opts):
     return opts
 
 # CONFIGURAÇÕES DE DOWNLOAD
-def get_ydl_opts(output_path):
+def get_ydl_opts(output_path, use_cookie=True):
     ffmpeg_exe = shutil.which('ffmpeg') or r'C:\ffmpeg\bin\ffmpeg.exe'
     opts = {
         'format': 'bestaudio/best',
@@ -170,7 +170,14 @@ def get_ydl_opts(output_path):
             }
         }
     }
-    return apply_common_opts(opts)
+    if use_cookie:
+        return apply_common_opts(opts)
+    # Sem cookie: ainda aplica proxy/impersonate se configurados, mas não o cookiefile
+    if PROXY_URL:
+        opts['proxy'] = PROXY_URL
+    if IMPERSONATE_TARGET:
+        opts['impersonate'] = IMPERSONATE_TARGET
+    return opts
 
 def fetch_single_query(q):
     if not q.strip(): 
@@ -259,38 +266,56 @@ def search_single(query):
     return results
 
 def download_with_fallback(v_id, work_dir):
+    video_url = f"https://www.youtube.com/watch?v={v_id}"
+
+    # TENTATIVA 1: sem cookie (client mobile costuma bastar e cookies de
+    # conta pessoal expiram com frequência, então não dependemos só deles)
     try:
-        print(f"[Downloader] Tentando baixar a música {v_id}...")
-        with yt_dlp.YoutubeDL(get_ydl_opts(work_dir)) as ydl:
-            ydl.download([f"https://www.youtube.com/watch?v={v_id}"])
+        print(f"[Downloader] Tentativa 1 (sem cookie): baixando {v_id}...")
+        with yt_dlp.YoutubeDL(get_ydl_opts(work_dir, use_cookie=False)) as ydl:
+            ydl.download([video_url])
             return True
     except Exception as e:
-        print(f"[Fallback] Falha ao baixar {v_id}. Buscando versão alternativa... Erro: [{type(e).__name__}] {repr(e)}")
+        print(f"[Downloader] Tentativa 1 falhou: [{type(e).__name__}] {repr(e)}")
+
+    # TENTATIVA 2: com cookie (fallback), só se houver cookie válido
+    if is_valid_cookie_file(COOKIE_FILE):
         try:
-            opts_search = {
-                'quiet': True, 
-                'extract_flat': True,
-                'extractor_args': {
-                    'youtube': {
-                        'player_client': ['mweb', 'android', 'web_embedded'],
-                        'player_skip': ['tv', 'web']
-                    }
+            print(f"[Downloader] Tentativa 2 (com cookie): baixando {v_id}...")
+            with yt_dlp.YoutubeDL(get_ydl_opts(work_dir, use_cookie=True)) as ydl:
+                ydl.download([video_url])
+                return True
+        except Exception as e:
+            print(f"[Downloader] Tentativa 2 (com cookie) falhou: [{type(e).__name__}] {repr(e)}")
+
+    # TENTATIVA 3: busca uma versão alternativa do mesmo título
+    print(f"[Fallback] Buscando versão alternativa de {v_id}...")
+    try:
+        opts_search = {
+            'quiet': True, 
+            'extract_flat': True,
+            'extractor_args': {
+                'youtube': {
+                    'player_client': ['mweb', 'android', 'web_embedded'],
+                    'player_skip': ['tv', 'web']
                 }
             }
-            apply_common_opts(opts_search)
-                
-            with yt_dlp.YoutubeDL(opts_search) as ydl_s:
-                info = ydl_s.extract_info(f"https://www.youtube.com/watch?v={v_id}", download=False)
-                title = info.get('title', '')
-                alt_info = ydl_s.extract_info(f"ytsearch1:{title} official audio", download=False)
-                alt_id = alt_info['entries'][0]['id']
-                
-            print(f"[Fallback] Encontrado alternativo: {alt_id}. Baixando...")
-            with yt_dlp.YoutubeDL(get_ydl_opts(work_dir)) as ydl2:
-                ydl2.download([f"https://www.youtube.com/watch?v={alt_id}"])
-                return True
-        except Exception:
-            return False
+        }
+        apply_common_opts(opts_search)
+            
+        with yt_dlp.YoutubeDL(opts_search) as ydl_s:
+            info = ydl_s.extract_info(video_url, download=False)
+            title = info.get('title', '')
+            alt_info = ydl_s.extract_info(f"ytsearch1:{title} official audio", download=False)
+            alt_id = alt_info['entries'][0]['id']
+            
+        print(f"[Fallback] Encontrado alternativo: {alt_id}. Baixando...")
+        with yt_dlp.YoutubeDL(get_ydl_opts(work_dir, use_cookie=False)) as ydl2:
+            ydl2.download([f"https://www.youtube.com/watch?v={alt_id}"])
+            return True
+    except Exception as e:
+        print(f"[Fallback] Falha na versão alternativa: [{type(e).__name__}] {repr(e)}")
+        return False
 
 # VERIFICADOR DE TEMPO INDIVIDUAL
 def verify_track_duration(track):

@@ -238,10 +238,9 @@ def stream_audio(video_id):
             return send_file(permanent_path)
 
     print(f"[PYTHON LOG] CACHE MISS. Extraindo link direto do YouTube via yt-dlp...")
-    # Usa a mesma lógica centralizada do downloader.py (cookie + proxy + impersonate)
-    from downloader import apply_common_opts
-    
-    opts = {
+    from downloader import apply_common_opts, is_valid_cookie_file, COOKIE_FILE
+
+    base_opts = {
         'format': 'bestaudio/best', 
         'quiet': True, 
         'nocheckcertificate': True,
@@ -252,30 +251,62 @@ def stream_audio(video_id):
             }
         }
     }
-    apply_common_opts(opts)
-    print("[PYTHON LOG] Opções de cookie/proxy/impersonate aplicadas via downloader.py.")
+
+    target_url = "https://www.youtube.com/watch?v=" + video_id
+
+    def _try_extract(use_cookie):
+        opts = dict(base_opts)
+        opts['extractor_args'] = {'youtube': dict(base_opts['extractor_args']['youtube'])}
+        if use_cookie:
+            apply_common_opts(opts)  # aplica cookie + proxy + impersonate
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            return ydl.extract_info(target_url, download=False)
+
+    info = None
+    last_error = None
+
+    # TENTATIVA 1: sem cookie. O cliente mobile/android muitas vezes toca
+    # vídeos normais sem precisar de login, e cookies de conta pessoal
+    # expiram com frequência — depender só deles trava o app toda vez
+    # que o Google rotaciona a sessão.
+    try:
+        print("[PYTHON LOG] Tentativa 1: extraindo SEM cookie (client mobile)...")
+        info = _try_extract(use_cookie=False)
+    except Exception as e:
+        last_error = e
+        print(f"[PYTHON LOG] Tentativa 1 falhou: [{type(e).__name__}] {repr(e)}")
+
+        # TENTATIVA 2 (fallback): com cookie, só se a 1ª falhar E existir
+        # um cookie válido configurado.
+        if is_valid_cookie_file(COOKIE_FILE):
+            try:
+                print("[PYTHON LOG] Tentativa 2: extraindo COM cookie (fallback)...")
+                info = _try_extract(use_cookie=True)
+            except Exception as e2:
+                last_error = e2
+                print(f"[PYTHON LOG] Tentativa 2 (com cookie) também falhou: [{type(e2).__name__}] {repr(e2)}")
+
+    if info is None:
+        print(f"[PYTHON LOG ERROR] Falha crítica de extração na Engine: [{type(last_error).__name__}] {repr(last_error)}")
+        return jsonify({'error': str(last_error)}), 500
 
     try:
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            target_url = "https://www.youtube.com/watch?v=" + video_id
-            info = ydl.extract_info(target_url, download=False)
-            
-            url = info.get('url')
-            if not url and 'formats' in info:
-                audio_formats = [f for f in info['formats'] if f.get('acodec') != 'none' and f.get('vcodec') == 'none']
-                if audio_formats:
-                    url = audio_formats[-1]['url'] 
-                else:
-                    url = info['formats'][-1]['url'] 
-            
-            if url:
-                print(f"[PYTHON LOG] Redirecionando navegador diretamente para o CDN de alta velocidade do Google!")
-                return redirect(url)
+        url = info.get('url')
+        if not url and 'formats' in info:
+            audio_formats = [f for f in info['formats'] if f.get('acodec') != 'none' and f.get('vcodec') == 'none']
+            if audio_formats:
+                url = audio_formats[-1]['url'] 
             else:
-                return jsonify({'error': 'Nenhuma URL extraída'}), 500
-                
+                url = info['formats'][-1]['url'] 
+        
+        if url:
+            print(f"[PYTHON LOG] Redirecionando navegador diretamente para o CDN de alta velocidade do Google!")
+            return redirect(url)
+        else:
+            return jsonify({'error': 'Nenhuma URL extraída'}), 500
+            
     except Exception as e: 
-        print(f"[PYTHON LOG ERROR] Falha crítica de extração na Engine: {e}")
+        print(f"[PYTHON LOG ERROR] Falha ao processar resultado da extração: [{type(e).__name__}] {repr(e)}")
         return jsonify({'error': str(e)}), 500
 
 
