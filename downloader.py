@@ -267,7 +267,16 @@ def download_with_fallback(v_id, work_dir):
     except Exception as e:
         print(f"[Fallback] Falha ao baixar {v_id}. Buscando versão alternativa... Erro: [{type(e).__name__}] {repr(e)}")
         try:
-            opts_search = {'quiet': True, 'extract_flat': True}
+            opts_search = {
+                'quiet': True, 
+                'extract_flat': True,
+                'extractor_args': {
+                    'youtube': {
+                        'player_client': ['mweb', 'android', 'web_embedded'],
+                        'player_skip': ['tv', 'web']
+                    }
+                }
+            }
             apply_common_opts(opts_search)
                 
             with yt_dlp.YoutubeDL(opts_search) as ydl_s:
@@ -288,7 +297,13 @@ def verify_track_duration(track):
     opts = {
         'quiet': True,
         'extract_flat': False,
-        'nocheckcertificate': True
+        'nocheckcertificate': True,
+        'extractor_args': {
+            'youtube': {
+                'player_client': ['mweb', 'android', 'web_embedded'],
+                'player_skip': ['tv', 'web']
+            }
+        }
     }
     apply_common_opts(opts)
         
