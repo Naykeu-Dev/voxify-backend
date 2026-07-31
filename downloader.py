@@ -55,8 +55,11 @@ MAX_RESULTS_PER_SEARCH = 10
 # ===================================================
 try:
     import curl_cffi
-    IMPERSONATE_TARGET = "chrome"
-    print("[BOOT] curl_cffi encontrado — impersonation de navegador Chrome ativado.")
+    # TEMPORARIAMENTE DESATIVADO para diagnóstico — suspeita de que o
+    # impersonate está causando as exceções sem mensagem que apareceram
+    # no log ("Erro ao processar CD:" vazio). Reativar depois de confirmar.
+    IMPERSONATE_TARGET = None
+    print("[BOOT] curl_cffi encontrado, mas impersonate DESATIVADO temporariamente para diagnóstico.")
 except ImportError:
     IMPERSONATE_TARGET = None
     print("[BOOT INFO] curl_cffi não instalado. Para ativar impersonation de navegador, "
@@ -181,7 +184,7 @@ def fetch_single_query(q):
                     'duration': duration
                 }
     except Exception as e:
-        print(f"[Voxify Debug Error] Falha ao extrair query avulsa: {e}")
+        print(f"[Voxify Debug Error] Falha ao extrair query avulsa: [{type(e).__name__}] {repr(e)}")
     return None
 
 def fetch_results(queries):
@@ -223,7 +226,7 @@ def search_single(query):
                         'duration': duration
                     })
         except Exception as e:
-            print(f"[Voxify Debug Error] Falha na busca avulsa de canal: {e}")
+            print(f"[Voxify Debug Error] Falha na busca avulsa de canal: [{type(e).__name__}] {repr(e)}")
     return results
 
 def download_with_fallback(v_id, work_dir):
@@ -233,7 +236,7 @@ def download_with_fallback(v_id, work_dir):
             ydl.download([f"https://www.youtube.com/watch?v={v_id}"])
             return True
     except Exception as e:
-        print(f"[Fallback] Falha ao baixar {v_id}. Buscando versão alternativa... Erro: {e}")
+        print(f"[Fallback] Falha ao baixar {v_id}. Buscando versão alternativa... Erro: [{type(e).__name__}] {repr(e)}")
         try:
             opts_search = {'quiet': True, 'extract_flat': True}
             apply_common_opts(opts_search)
@@ -265,7 +268,7 @@ def verify_track_duration(track):
             info = ydl.extract_info(track['url'], download=False)
             return info.get('duration')
     except Exception as e:
-        print(f"[Voxify Debug Error] Falha ao extrair tempo de {track['title']}: {e}")
+        print(f"[Voxify Debug Error] Falha ao extrair tempo de {track['title']}: [{type(e).__name__}] {repr(e)}")
         return None
 
 # GERADOR DE CD COM FILTRO REAL DE TEMPO (< 15M)
@@ -308,7 +311,7 @@ def generate_cd_playlist(artist, limit=20):
                         'videoId': entry.get('id')
                     })
     except Exception as e: 
-        print(f"[IA CD Generator Error] Erro ao processar CD: {e}")
+        print(f"[IA CD Generator Error] Erro ao processar CD: [{type(e).__name__}] {repr(e)}")
         return []
 
     print(f"[IA CD Generator] Validando tempo de {len(candidates)} faixas candidatas em paralelo...")
@@ -419,5 +422,5 @@ def fetch_single_group(group, items_per_group, opts):
                     for entry in info['entries'] if entry.get('id')
                 ]
     except Exception as e:
-        print(f"[Voxify Engine Warning] Falha na busca paralela de {group}: {e}")
+        print(f"[Voxify Engine Warning] Falha na busca paralela de {group}: [{type(e).__name__}] {repr(e)}")
     return []
