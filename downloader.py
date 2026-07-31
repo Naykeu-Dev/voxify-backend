@@ -23,6 +23,45 @@ if not os.path.exists(TMP_DIR):
 _RENDER_SECRET_COOKIE_PATH = "/etc/secrets/youtube_cookies.txt"
 _LOCAL_COOKIE_PATH = os.path.join(BASE_DIR, 'youtube_cookies.txt')
 
+# ===================================================
+# SUPORTE A PROXY (opcional)
+# Se o IP do Render for bloqueado persistentemente pelo YouTube (403
+# mesmo com cookies válidos), configure a env var YTDLP_PROXY no Render
+# com a URL do proxy, ex: http://usuario:senha@host:porta
+# Deixe em branco / não configure para manter o comportamento padrão (sem proxy).
+# ===================================================
+PROXY_URL = os.environ.get("YTDLP_PROXY", "").strip() or None
+
+if PROXY_URL:
+    print(f"[BOOT] Proxy configurado e será usado em todas as requisições do yt-dlp.")
+else:
+    print(f"[BOOT] Nenhum proxy configurado (YTDLP_PROXY vazio). Requisições saem do IP direto do Render.")
+
+# ===================================================
+# LIMITE MÁXIMO DE RESULTADOS POR BUSCA
+# Buscas grandes (20+) forçam paginação no YouTube, que é o gatilho
+# mais comum de bloqueio 403. Para uso pessoal, 5-10 resultados por
+# busca já é suficiente e reduz bastante o risco de bloqueio.
+# ===================================================
+MAX_RESULTS_PER_SEARCH = 10
+
+# ===================================================
+# IMPERSONATION DE NAVEGADOR (curl_cffi)
+# Faz as requisições HTTP terem a mesma "assinatura digital" (TLS
+# fingerprint) de um navegador Chrome real, em vez da assinatura padrão
+# de bibliotecas Python — isso é bem mais convincente pro YouTube do
+# que só trocar o User-Agent, e reduz a chance de bloqueio por bot.
+# Requer: pip install curl_cffi (adicionar no requirements.txt)
+# ===================================================
+try:
+    import curl_cffi
+    IMPERSONATE_TARGET = "chrome"
+    print("[BOOT] curl_cffi encontrado — impersonation de navegador Chrome ativado.")
+except ImportError:
+    IMPERSONATE_TARGET = None
+    print("[BOOT INFO] curl_cffi não instalado. Para ativar impersonation de navegador, "
+          "adicione 'curl_cffi>=0.7.1' ao requirements.txt.")
+
 def get_cookie_file_path():
     """
     Retorna o caminho do cookies.txt correto dependendo do ambiente:
@@ -60,6 +99,19 @@ def format_url(url_or_id):
     if "http://" in url_or_id or "https://" in url_or_id: return url_or_id
     return f"https://www.youtube.com/watch?v={url_or_id}"
 
+def apply_common_opts(opts):
+    """
+    Aplica cookie, proxy e impersonation de navegador nas opções do yt-dlp,
+    centralizando a lógica que antes estava repetida em cada função.
+    """
+    if is_valid_cookie_file(COOKIE_FILE):
+        opts['cookiefile'] = COOKIE_FILE
+    if PROXY_URL:
+        opts['proxy'] = PROXY_URL
+    if IMPERSONATE_TARGET:
+        opts['impersonate'] = IMPERSONATE_TARGET
+    return opts
+
 # CONFIGURAÇÕES DE DOWNLOAD
 def get_ydl_opts(output_path):
     ffmpeg_exe = shutil.which('ffmpeg') or r'C:\ffmpeg\bin\ffmpeg.exe'
@@ -86,9 +138,7 @@ def get_ydl_opts(output_path):
             }
         }
     }
-    if is_valid_cookie_file(COOKIE_FILE):
-        opts['cookiefile'] = COOKIE_FILE
-    return opts
+    return apply_common_opts(opts)
 
 def fetch_single_query(q):
     if not q.strip(): 
@@ -101,8 +151,7 @@ def fetch_single_query(q):
         'sleep_interval_requests': 1,
         'retries': 3,
     }
-    if is_valid_cookie_file(COOKIE_FILE):
-        search_opts['cookiefile'] = COOKIE_FILE
+    apply_common_opts(search_opts)
         
     try:
         with yt_dlp.YoutubeDL(search_opts) as ydl:
@@ -151,12 +200,11 @@ def search_single(query):
         'extract_flat': True, 
         'nocheckcertificate': True
     }
-    if is_valid_cookie_file(COOKIE_FILE):
-        search_opts['cookiefile'] = COOKIE_FILE
+    apply_common_opts(search_opts)
         
     with yt_dlp.YoutubeDL(search_opts) as ydl:
         try:
-            info = ydl.extract_info(f"ytsearch5:{query}", download=False)
+            info = ydl.extract_info(f"ytsearch{MAX_RESULTS_PER_SEARCH}:{query}", download=False)
             if 'entries' in info:
                 for entry in info['entries']:
                     duration = entry.get('duration')
@@ -188,8 +236,7 @@ def download_with_fallback(v_id, work_dir):
         print(f"[Fallback] Falha ao baixar {v_id}. Buscando versão alternativa... Erro: {e}")
         try:
             opts_search = {'quiet': True, 'extract_flat': True}
-            if is_valid_cookie_file(COOKIE_FILE):
-                opts_search['cookiefile'] = COOKIE_FILE
+            apply_common_opts(opts_search)
                 
             with yt_dlp.YoutubeDL(opts_search) as ydl_s:
                 info = ydl_s.extract_info(f"https://www.youtube.com/watch?v={v_id}", download=False)
@@ -211,8 +258,7 @@ def verify_track_duration(track):
         'extract_flat': False,
         'nocheckcertificate': True
     }
-    if is_valid_cookie_file(COOKIE_FILE):
-        opts['cookiefile'] = COOKIE_FILE
+    apply_common_opts(opts)
         
     try:
         with yt_dlp.YoutubeDL(opts) as ydl:
@@ -227,8 +273,8 @@ def generate_cd_playlist(artist, limit=20):
     candidates = []
     # Antes: limit * 2 (podia pedir 40+ resultados, forçando paginação
     # multi-página no YouTube, que é o que dispara bloqueio 403).
-    # Agora: no máximo 20, cabendo numa única página de busca.
-    search_count = min(limit * 2, 20)
+    # Agora: capado em MAX_RESULTS_PER_SEARCH (10), uso pessoal não precisa de mais.
+    search_count = min(limit * 2, MAX_RESULTS_PER_SEARCH)
     search_query = f"ytsearch{search_count}:{artist} clipe oficial"
     opts = {
         'quiet': True, 
@@ -236,8 +282,7 @@ def generate_cd_playlist(artist, limit=20):
         'nocheckcertificate': True, 
         'compat_opts': ['no-youtube-js']
     }
-    if is_valid_cookie_file(COOKIE_FILE):
-        opts['cookiefile'] = COOKIE_FILE
+    apply_common_opts(opts)
         
     print(f"[IA CD Generator] Buscando {limit} músicas de: {artist}")
     try:
@@ -297,7 +342,7 @@ def generate_custom_playlist(query, limit=30):
         raw_terms = [t.strip() for t in clean_query.split(' ') if len(t.strip()) > 2]
         
     grouped_terms = [" ".join(raw_terms[i:i+2]) for i in range(0, len(raw_terms), 2)] or [clean_query]
-    items_per_group = max(3, min(15, limit // len(grouped_terms) + 1))
+    items_per_group = max(3, min(MAX_RESULTS_PER_SEARCH, limit // len(grouped_terms) + 1))
     
     opts = {
         'quiet': True, 
@@ -308,8 +353,7 @@ def generate_custom_playlist(query, limit=30):
         'retries': 3,
         'sleep_interval_requests': 1,
     }
-    if is_valid_cookie_file(COOKIE_FILE):
-        opts['cookiefile'] = COOKIE_FILE
+    apply_common_opts(opts)
         
     results = []
     

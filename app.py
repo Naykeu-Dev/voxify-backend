@@ -238,9 +238,8 @@ def stream_audio(video_id):
             return send_file(permanent_path)
 
     print(f"[PYTHON LOG] CACHE MISS. Extraindo link direto do YouTube via yt-dlp...")
-    # Usa a mesma lógica centralizada do downloader.py (Secret File do Render > arquivo local)
-    from downloader import get_cookie_file_path
-    COOKIE_FILE = get_cookie_file_path()
+    # Usa a mesma lógica centralizada do downloader.py (cookie + proxy + impersonate)
+    from downloader import apply_common_opts
     
     opts = {
         'format': 'bestaudio/best', 
@@ -253,14 +252,8 @@ def stream_audio(video_id):
             }
         }
     }
-    
-    # Valida o arquivo de cookies antes de injetar
-    from downloader import is_valid_cookie_file
-    if is_valid_cookie_file(COOKIE_FILE):
-        opts['cookiefile'] = COOKIE_FILE
-        print("[PYTHON LOG] Utilizando cookies validados Netscape.")
-    else:
-        print("[PYTHON LOG] youtube_cookies.txt ausente ou inválido. Prosseguindo em modo anônimo.")
+    apply_common_opts(opts)
+    print("[PYTHON LOG] Opções de cookie/proxy/impersonate aplicadas via downloader.py.")
 
     try:
         with yt_dlp.YoutubeDL(opts) as ydl:
